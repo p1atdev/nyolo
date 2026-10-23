@@ -32,22 +32,25 @@ class PoseHead(nn.Module):
         super().__init__()
         k = config.schema.num_keypoints
         self.k = k
-        self.box = nn.ModuleList(_tower(c, 16, 4) for c in (64, 128, 256))
+        channels = config.head_channels
+        box_width = max(16, channels[0] // 4)
+        class_width = channels[0]
+        self.box = nn.ModuleList(_tower(c, box_width, 4) for c in channels)
         self.classes = nn.ModuleList(
             nn.Sequential(
                 Conv(c, c, 3, groups=c),
-                Conv(c, 64),
-                Conv(64, 64, 3, groups=64),
-                Conv(64, 64),
-                nn.Conv2d(64, config.num_classes, 1),
+                Conv(c, class_width),
+                Conv(class_width, class_width, 3, groups=class_width),
+                Conv(class_width, class_width),
+                nn.Conv2d(class_width, config.num_classes, 1),
             )
-            for c in (64, 128, 256)
+            for c in channels
         )
         self.joints = nn.ModuleList(
-            _tower(c, max(16, 3 * k), 3 * k) for c in (64, 128, 256)
+            _tower(c, max(box_width, 3 * k), 3 * k) for c in channels
         )
         self.sigma = nn.ModuleList(
-            _tower(c, max(16, 2 * k), 2 * k) for c in (64, 128, 256)
+            _tower(c, max(box_width, 2 * k), 2 * k) for c in channels
         )
         for level, stride in enumerate((8, 16, 32)):
             nn.init.constant_(_projection_bias(self.box[level]), 1.0)
@@ -110,8 +113,8 @@ class YOLO26Pose(nn.Module):
     def __init__(self, config: YOLO26PoseConfig | None = None) -> None:
         super().__init__()
         self.config = YOLO26PoseConfig() if config is None else config
-        self.backbone = Backbone()
-        self.neck = Neck()
+        self.backbone = Backbone(self.config)
+        self.neck = Neck(self.config)
         self.one_to_many = PoseHead(self.config)
         self.one_to_one = deepcopy(self.one_to_many)
 

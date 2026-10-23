@@ -21,16 +21,16 @@ uv sync
 
 ### 1. 学習
 
-[`PoseTrainingModule`](src/nyolo/learning/training_module.py) はモデルの順伝播、ラベル割り当て、損失計算をまとめたモジュールです。
+[`PoseTrainingModule`](src/nyolo/learning/criterion.py) はモデルの順伝播、ラベル割り当て、損失計算をまとめたモジュールです。
 
 ```python
 import torch
-from nyolo import YOLO26Pose
+from nyolo import YOLO26Pose, YOLO26PoseConfig
 from nyolo.learning import PoseTrainingModule
 from nyolo.pose.types import PoseTargets
 
 device = "mps"  # または "cpu"
-training = PoseTrainingModule(YOLO26Pose()).to(device)
+training = PoseTrainingModule(YOLO26Pose(YOLO26PoseConfig(scale="s"))).to(device)
 optimizer = torch.optim.AdamW(training.parameters(), lr=1e-3)
 
 # images: float32 [B, 3, H, W] (RGB, 0.0〜1.0, H・Wは32の倍数)
@@ -98,5 +98,6 @@ uv run ty check src
 
 - [モデル・実装仕様](docs/specs/yolo26-pose.md)
 - [動作検証レポート](docs/validation.md)
+- [サイズ展開・torch.compile の検証結果と制約](docs/scale-compile-validation.md)
 - [出典とライセンスの境界](docs/provenance.md)
 - ライセンス: [Apache-2.0](LICENSE)

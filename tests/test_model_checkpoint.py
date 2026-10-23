@@ -59,10 +59,46 @@ def test_custom_schema_checkpoint_and_rle_state(tmp_path, device):
 
 
 def test_reject_unsupported_contracts():
-    with pytest.raises(ValueError, match="only"):
-        YOLO26PoseConfig(scale="s")
+    with pytest.raises(ValueError, match="scales"):
+        YOLO26PoseConfig(scale="tiny")
     with pytest.raises(ValueError, match="sigma"):
         PoseSchema("bad", ("a",), (0,), ())
     with pytest.raises(ValueError, match="multiples"):
         YOLO26Pose().eval()(torch.zeros(1, 3, 65, 64))
     assert COCO17.num_keypoints == 17
+
+
+@pytest.mark.parametrize(
+    "scale,channels,repeats",
+    (
+        ("n", (64, 128, 256), 1),
+        ("s", (128, 256, 512), 1),
+        ("m", (256, 512, 512), 1),
+        ("l", (256, 512, 512), 2),
+        ("x", (384, 768, 768), 2),
+    ),
+)
+def test_compound_scale_contract(scale, channels, repeats):
+    config = YOLO26PoseConfig(scale=scale)
+    assert config.head_channels == channels
+    assert config.repeats == repeats
+    assert config.architecture_version == f"nyolo26-pose-{scale}-v1"
+    model = YOLO26Pose(config).eval()
+    with torch.no_grad():
+        images = torch.rand(1, 3, 64, 96)
+        features = model.neck(model.backbone(images))
+        assert [x.shape[1] for x in features] == list(channels)
+        assert model(images).keypoint_offsets.shape == (1, 126, 17, 2)
+        dual = model.forward_train(images)
+        assert dual.one_to_one.sigma_logits.shape == (1, 126, 17, 2)
+    if scale == "n":
+        # The refactor must retain the original n architecture/state dimensions.
+        assert sum(p.numel() for p in model.parameters()) == 3640624
+
+
+def test_reject_scale_version_mismatch():
+    with pytest.raises(ValueError, match="does not match"):
+        YOLO26PoseConfig(scale="x", architecture_version="nyolo26-pose-n-v1")
+    assert (
+        YOLO26PoseConfig(architecture_version="nyolo26-pose-n-v1") == YOLO26PoseConfig()
+    )

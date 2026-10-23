@@ -1,4 +1,4 @@
-# nyolo26-pose-n-v1
+# nyolo26-pose-{n,s,m,l,x}-v1
 
 This document fixes the implementation contract. It is a specification for an
 independent YOLO26-Pose implementation, not an official checkpoint conversion
@@ -7,8 +7,23 @@ specification. Sources and attribution are in [provenance](../provenance.md).
 ## Architecture
 
 The macro graph and block compositions follow paper supplementary Figures S1/S2.
-Nano uses depth 0.5 and width 0.25. Repeated macro blocks therefore have one
-iteration. C3k has two internal bottlenecks. No generic YAML parser is used.
+Each scale has its own explicit architecture version. The numeric compound-scale
+settings are taken from the public guide; the independently implemented graph and
+per-stage block choices are shared across these scales. This is not a claim of
+official larger-model parameter counts or checkpoint compatibility.
+
+| Scale | Depth | Width | Channel cap before width | Head channels | Repeated blocks |
+|---|---:|---:|---:|---|---:|
+| n | .5 | .25 | 1024 | 64/128/256 | 1 |
+| s | .5 | .5 | 1024 | 128/256/512 | 1 |
+| m | .5 | 1 | 512 | 256/512/512 | 1 |
+| l | 1 | 1 | 512 | 256/512/512 | 2 |
+| x | 1 | 1.5 | 512 | 384/768/768 | 2 |
+
+Channels are rounded upward to a multiple of eight after cap/width scaling.
+Repeated C3k2 and C2PSA units use max(round(2*depth),1) iterations. The final
+attention neck C3k2 has one iteration. C3k has two internal bottlenecks. No generic
+YAML parser is used. The table below details n; other scales apply these rules.
 
 | Backbone stage | Output channels | Stride | Block |
 |---|---:|---:|---|
@@ -38,10 +53,11 @@ checkpoint representation. This release explicitly chooses:
 
 - Conv + BatchNorm (eps .001, momentum .03) + SiLU; residual spatial attention
   with q/k dimension half of the value dimension, and depthwise positional Conv.
-- Box towers: two 16-channel Conv layers and a four-channel linear projection.
-  Class towers: two depthwise/pointwise pairs, hidden width 64.
-- Joint towers: two Conv layers, width max(16, 3K), output 3K.
-  Uncertainty towers: width max(16, 2K), output 2K.
+- With C the first head's input channels, box towers have two Conv layers of
+  width max(16,C/4) and a four-channel projection. Class towers have two
+  depthwise/pointwise pairs, hidden width C.
+- Joint towers have width max(box_width,3K), output 3K.
+  Uncertainty towers have width max(box_width,2K), output 2K.
 - Grid centers a=(x+.5,y+.5)*stride. Signed box distances d predict
   [a_x-s*d_l, a_y-s*d_t, a_x+s*d_r, a_y+s*d_b] with no DFL.
 - Keypoints decode as a + 2*stride*offset. XY has no bounded activation.
@@ -54,7 +70,10 @@ checkpoint representation. This release explicitly chooses:
   RLE 1, keypoint localizability BCE 1. These are explicit initial settings,
   not a claim to reproduce the released model's optimized recipe.
 
-These decisions are part of architecture version nyolo26-pose-n-v1. Official
+These decisions are part of architecture versions nyolo26-pose-{scale}-v1. The n
+state-dictionary keys, dimensions and architecture ID retain their original form.
+The default architecture ID is derived from scale; an explicitly mismatched ID
+is rejected. Official
 parameter names, exact numerical equivalence and weight compatibility are not
 promised. Both heads and uncertainty towers are retained in saved model state.
 
@@ -99,10 +118,16 @@ unbounded through transforms, filtering, checkpoint use and JSON serialization.
 ## Runtime and scope
 
 Supported: PyTorch float32 eager on explicit cpu or mps; rectangular input sides
-divisible by 32; n-size pose; tensor and PIL inference; training primitives.
+divisible by 32; n/s/m/l/x pose; tensor and PIL inference; training primitives.
 MPS entry points reject PYTORCH_ENABLE_MPS_FALLBACK=1. No automatic device, dtype,
 alternate head or implementation selection is supplied. Nonfinite decoded
-predictions are an error. CUDA, compile, Triton, TPU and other tasks are pending.
+predictions are an error. CUDA, Triton, TPU and other tasks are pending.
+
+Model-only torch.compile is investigated using explicit backend, fullgraph=True
+and dynamic=False. Inference means model(images); training means forward_train
+compiled with criterion outside the compiled region. PIL/JSON IO and annotation
+validation are separate boundaries. No automatic eager retry is provided. See
+the runtime validation report for the measured support and performance envelope.
 
 Checkpoints contain a format version, architecture and coordinate policy, complete
 joint schema and tensor state dictionaries. Loading uses weights_only=True and

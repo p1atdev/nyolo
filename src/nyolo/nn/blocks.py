@@ -98,17 +98,24 @@ class C3k2(nn.Module):
         expansion: float = 0.5,
         c3k: bool = False,
         attention: bool = False,
+        repeats: int = 1,
     ) -> None:
         super().__init__()
         hidden = int(out_channels * expansion)
         self.split = Conv(in_channels, hidden * 2)
         block = C3k(hidden) if c3k else Bottleneck(hidden)
         self.block = nn.Sequential(block, PSABlock(hidden)) if attention else block
-        self.merge = Conv(hidden * 3, out_channels)
+        self.extra_blocks = nn.ModuleList(
+            C3k(hidden) if c3k else Bottleneck(hidden) for _ in range(repeats - 1)
+        )
+        self.merge = Conv(hidden * (2 + repeats), out_channels)
 
     def forward(self, x: Tensor) -> Tensor:
         left, right = self.split(x).chunk(2, 1)
-        return self.merge(torch.cat((left, right, self.block(right)), 1))
+        pieces = [left, right, self.block(right)]
+        for block in self.extra_blocks:
+            pieces.append(block(pieces[-1]))
+        return self.merge(torch.cat(pieces, 1))
 
 
 class SPPF(nn.Module):
@@ -126,12 +133,18 @@ class SPPF(nn.Module):
 
 
 class C2PSA(nn.Module):
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, repeats: int = 1) -> None:
         super().__init__()
         self.split = Conv(channels, channels)
         self.block = PSABlock(channels // 2)
+        self.extra_blocks = nn.ModuleList(
+            PSABlock(channels // 2) for _ in range(repeats - 1)
+        )
         self.merge = Conv(channels, channels)
 
     def forward(self, x: Tensor) -> Tensor:
         left, right = self.split(x).chunk(2, 1)
-        return self.merge(torch.cat((left, self.block(right)), 1))
+        right = self.block(right)
+        for block in self.extra_blocks:
+            right = block(right)
+        return self.merge(torch.cat((left, right), 1))

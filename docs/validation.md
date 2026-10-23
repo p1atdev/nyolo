@@ -49,3 +49,6 @@ bit-for-bit reproducibility guarantee.
 This validates trainability and runtime behavior on the synthetic inputs. It does
 not establish COCO AP, real-data generalization, equivalence to official weights,
 or CUDA/compile/Triton/TPU support.
+
+The subsequent [scale and torch.compile investigation](scale-compile-validation.md)
+records the expanded model family and current compiler evidence separately.

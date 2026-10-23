@@ -2,18 +2,21 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from nyolo.models.yolo26.config import YOLO26PoseConfig
 from nyolo.nn.blocks import C3k2, Conv
 
 
 class Neck(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, config: YOLO26PoseConfig) -> None:
         super().__init__()
-        self.top4 = C3k2(384, 128)
-        self.top3 = C3k2(256, 64)
-        self.down3 = Conv(64, 64, 3, 2)
-        self.bottom4 = C3k2(192, 128)
-        self.down4 = Conv(128, 128, 3, 2)
-        self.bottom5 = C3k2(384, 256, attention=True)
+        c256, c512, c1024 = config.head_channels
+        n = config.repeats
+        self.top4 = C3k2(c1024 + c512, c512, repeats=n)
+        self.top3 = C3k2(2 * c512, c256, repeats=n)
+        self.down3 = Conv(c256, c256, 3, 2)
+        self.bottom4 = C3k2(c256 + c512, c512, repeats=n)
+        self.down4 = Conv(c512, c512, 3, 2)
+        self.bottom5 = C3k2(c512 + c1024, c1024, attention=True)
 
     def forward(
         self, features: tuple[Tensor, Tensor, Tensor]

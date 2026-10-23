@@ -1,36 +1,27 @@
 # nyolo
 
-独立実装の PyTorch YOLO26-Pose ライブラリ。初期版は **n サイズ・pose・画面外
-キーポイント・CPU/MPS の FP32 eager** に対応します。ソースコードは Apache-2.0。
+YOLO の PyTorch 再実装。
 
-モデル、割り当て、損失、推論を提供します。Dataset と実運用の学習ループは含めず、
-必要になった時点で別パッケージ `nyolo-train` に追加する構成です。
-事前学習済み重みは同梱・自動取得しません。実用的な推論には自身で学習した重みが必要です。
+モデル定義、ラベル割り当て、損失関数、および推論パイプラインを提供します。
 
-## セットアップと検証
+## 特徴
 
-```sh
-uv sync --frozen
-PYTORCH_ENABLE_MPS_FALLBACK=0 uv run --frozen pytest -q
-uv run --frozen ruff check .
-uv run --frozen ruff format --check .
-uv run --frozen ty check src
-```
+- **画面外キーポイント対応**: 画像境界で座標をクリップせず、画面外にはみ出した関節位置もそのまま学習・推論します。
+- **NMS-free 推論**: 学習時は one-to-many と one-to-one の二重ヘッドを用い、推論時は後処理の NMS を不要にする one-to-one ヘッドのみで高速に出力します。
+- **カスタマイズ可能な関節定義**: 標準の COCO 17 点（[`COCO17`](src/nyolo/pose/schema.py)）のほか、[`PoseSchema`](src/nyolo/pose/schema.py) で独自のキーポイント構造を定義できます。
+- **対応環境**: Python 3.12 以上、CPU / Apple Silicon (MPS) の FP32 eager 実行。
 
-MPS の実機で、合成した2画像への過学習、画面外点の誤差、forward/backward、
-640×640 の推論、重みの再読込、PIL 推論 API をまとめて検証できます。
-この検証用ループは配布パッケージの外にあります。
+## セットアップ
 
 ```sh
-PYTORCH_ENABLE_MPS_FALLBACK=0 uv run --frozen python tools/validate_pose.py \
-  --device mps --steps 240 --output artifacts/mps-smoke
+uv sync
 ```
 
-`metrics.json` に合否と測定値、`predictions.json` に画面外座標を含む予測を保存します。
-生成する重みは合成データへの過学習確認専用です。実画像への精度を示すものではありません。
-MPS 未対応演算を CPU に回す設定や、device の自動切替は使いません。
+## 使い方
 
-## 学習コードから使う
+### 1. 学習
+
+[`PoseTrainingModule`](src/nyolo/learning/training_module.py) はモデルの順伝播、ラベル割り当て、損失計算をまとめたモジュールです。
 
 ```python
 import torch
@@ -38,75 +29,74 @@ from nyolo import YOLO26Pose
 from nyolo.learning import PoseTrainingModule
 from nyolo.pose.types import PoseTargets
 
-training = PoseTrainingModule(YOLO26Pose()).to("mps")
-optimizer = torch.optim.AdamW(training.parameters(), lr=0.001)
+device = "mps"  # または "cpu"
+training = PoseTrainingModule(YOLO26Pose()).to(device)
+optimizer = torch.optim.AdamW(training.parameters(), lr=1e-3)
 
-# images: float32 [B,3,H,W], RGB/255, H/W は32の倍数
-# targets: PoseTargets。座標は前処理後の画像のピクセル単位。
+# images: float32 [B, 3, H, W] (RGB, 0.0〜1.0, H・Wは32の倍数)
+# targets: PoseTargets (前処理後画像のピクセル座標系)
 loss = training(images, targets, progress=epoch / (total_epochs - 1))
+
 optimizer.zero_grad(set_to_none=True)
 loss.total.backward()
 optimizer.step()
 ```
 
-`PoseTargets` は次の padded tensor を受け取ります。全 tensor は入力と同じ device に置きます。
+教師データ [`PoseTargets`](src/nyolo/pose/types.py) には、バッチ内でパディングされた以下の Tensor（入力画像と同じ device）を渡します。
 
-| フィールド | 形状 | 型・意味 |
-|---|---|---|
-| `boxes` | B,T,4 | float32、画像内の xyxy bbox |
-| `labels` | B,T | int64、クラス ID |
-| `keypoints` | B,T,K,2 | float32、画面外を許容する xy |
-| `visibility` | B,T,K | int64、0=位置不明、1=遮蔽、2=可視 |
-| `valid` | B,T | bool、実在するインスタンス |
+| フィールド | 形状 | 型 | 説明 |
+|---|---|---|---|
+| `boxes` | `[B, T, 4]` | `float32` | 画像内のバウンディングボックス (`xyxy`) |
+| `labels` | `[B, T]` | `int64` | クラス ID |
+| `keypoints` | `[B, T, K, 2]` | `float32` | キーポイント座標 (`xy`、負値や画像サイズ超過も可) |
+| `visibility` | `[B, T, K]` | `int64` | `0`: 未定義/不明、`1`: 遮蔽または画面外、`2`: 可視 |
+| `valid` | `[B, T]` | `bool` | パディングではなく実在するインスタンスか |
 
-画面外点は座標を保って `visibility=1` とします。`v>0` の全点を座標損失の対象にし、
-画像境界でクリップしません。`v=0` の座標は NaN でも受け付け、損失から除外します。
-キーポイントスコアは位置推定の可否で学習し、物理的な可視性とは区別します。
+- `visibility > 0` のキーポイントが座標回帰損失の対象になります（画面外でも位置がわかる点は `visibility = 1` として座標を与えます）。
+- `visibility = 0` の点は損失から除外されます（座標は `NaN` でも構いません）。
 
-標準は COCO 17 点。独自の関節数は `PoseSchema` に関節名、左右対応、OKS 定数を明示し、
-`YOLO26PoseConfig(schema=...)` で指定できます。
+独自のキーポイント定義を使う場合は、`YOLO26PoseConfig(schema=...)` を `YOLO26Pose` に渡します。
 
-## 推論と保存
+### 2. 重みの保存と推論
+
+推論用の重み保存には [`save_checkpoint`](src/nyolo/checkpoint.py)、推論の実行には [`Predictor`](src/nyolo/inference/predictor.py) を使用します。
 
 ```python
 from PIL import Image
-from nyolo.checkpoint import save_checkpoint, load_checkpoint, save_training_state
+from nyolo.checkpoint import load_checkpoint, save_checkpoint
 from nyolo.inference import Predictor
 
+# 推論用チェックポイントの保存と読み込み
 save_checkpoint("model.pt", training.model)
-save_training_state("training-components.pt", training)  # RLE の学習済み状態も保存
-
 model = load_checkpoint("model.pt", device="mps")
+
+# PIL Image からの推論（リサイズ・パディングと元画像座標への逆変換を自動実行）
 predictor = Predictor(model, device="mps", image_size=(640, 640))
 with Image.open("image.png") as image:
     result = predictor([image])
-records = result.to_records()  # 元画像の座標。負の値や画像寸法超過を保持。
+
+# 元画像のピクセル座標系での辞書リストを取得（画面外座標も保持）
+records = result.to_records()
 ```
 
-`Predictor` は渡されたモデルを指定 device の eval モードにします。学習を続ける際は
-`training.train()` を呼んでください。推論は one-to-one / NMS-free の経路です。
-モデルを直接呼ぶ `model(images)` は生 tensor、`model.forward_train(images)` は二系統の
-生 tensor を返します。RLE flow は推論時に実行しません。
+CLI から推論を実行することもできます。
 
 ```sh
-uv run --frozen nyolo predict --checkpoint model.pt --input image.png \
+uv run nyolo predict --checkpoint model.pt --input image.png \
   --device mps --size 640 --output predictions.json
 ```
 
-保存形式は version・構造・関節 schema・座標規約・state_dict を持ち、読込は
-`weights_only=True` / strict です。`training-components.pt` はモデルと criterion の
-保存であり、optimizer や RNG を含む完全な学習再開ファイルではありません。
+## 開発・テスト
 
-## 実装範囲と来歴
+```sh
+uv run pytest -q
+uv run ruff check .
+uv run ty check src
+```
 
-公開論文から構成した独立実装です。Ultralytics の実装、モデル YAML、公式重みを
-取り込まず、公式 checkpoint の互換性・同一パラメータ数・公式精度の再現は保証しません。
-公開論文に詳細がない tower 幅・正規化等の選択は、独自の構造バージョンとして記録します。
+## 詳細ドキュメント・ライセンス
 
-- [実装仕様](docs/specs/yolo26-pose.md)
-- [MPS の検証結果](docs/validation.md)
-- [出典・ライセンスの境界](docs/provenance.md)
-- [Apache-2.0 ライセンス](LICENSE)
-
-CUDA、torch.compile、Triton、他サイズ・他タスク、TPU は未実装です。
-コードのライセンスと、利用するデータ・配布する重み・第三者の権利は別途確認してください。
+- [モデル・実装仕様](docs/specs/yolo26-pose.md)
+- [動作検証レポート](docs/validation.md)
+- [出典とライセンスの境界](docs/provenance.md)
+- ライセンス: [Apache-2.0](LICENSE)

@@ -1,0 +1,15 @@
+nyolo
+Copyright 2026 Plat
+
+Independently authored implementation of algorithms described by the YOLO26,
+RLE and RealNVP research papers. See docs/provenance.md for references.
+This project is not affiliated with or endorsed by Ultralytics.
+
+Research references:
+Jocher et al., Ultralytics YOLO26: Unified Real-Time End-to-End Vision Models,
+2026, https://arxiv.org/abs/2606.03748 (CC BY 4.0 paper).
+Li et al., Human Pose Regression with Residual Log-likelihood Estimation,
+2021, https://arxiv.org/abs/2107.11291.
+Dinh et al., Density estimation using Real NVP,
+2017, https://arxiv.org/abs/1605.08803.
+Standard COCO joint-order and OKS sigma data: https://cocodataset.org/#keypoints-eval.

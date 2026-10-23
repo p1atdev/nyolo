@@ -1,0 +1,41 @@
+[project]
+name = "nyolo"
+version = "0.1.0"
+description = "Independent PyTorch YOLO26 pose models with unbounded keypoints"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [
+    { name = "Plat", email = "60182057+p1atdev@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.4",
+    "pillow>=12.3.0",
+    "torch>=2.14.1",
+]
+
+[project.scripts]
+nyolo = "nyolo.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.6,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = ["docs/**", "tests/**", "tools/**", "uv.lock"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+    "ty>=0.0.88",
+]
+
+# PyTorch declares Module.forward as a mutable Callable attribute. Concrete
+# forward methods are its supported extension API, rather than mutable overrides.
+[[tool.ty.overrides]]
+include = ["src/nyolo/nn/**", "src/nyolo/models/**", "src/nyolo/learning/**"]
+
+[tool.ty.overrides.rules]
+invalid-mutable-override = "ignore"

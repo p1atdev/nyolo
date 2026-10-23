@@ -112,6 +112,9 @@ def measurements(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("cpu", "mps"), required=True)
+    parser.add_argument(
+        "--attention-backend", choices=("naive", "sdpa"), default="sdpa"
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--steps", type=int, default=240)
     parser.add_argument("--size", type=int, default=96)
@@ -126,7 +129,9 @@ def main() -> None:
     for i, image in enumerate(originals):
         image.save(args.output / f"synthetic-{i}.png")
     images, targets = images.to(device), targets.to(device)
-    module = PoseTrainingModule(YOLO26Pose()).to(device)
+    module = PoseTrainingModule(
+        YOLO26Pose(attention_backend=args.attention_backend)
+    ).to(device)
     optimizer = torch.optim.AdamW(module.parameters(), lr=0.002, weight_decay=0.0)
     before = measurements(module.model, images, targets)
     gradients: dict[str, float] = {}
@@ -173,7 +178,9 @@ def main() -> None:
     checkpoint = args.output / "synthetic-model.pt"
     save_checkpoint(checkpoint, module.model)
     save_training_state(args.output / "synthetic-training-components.pt", module)
-    restored = load_checkpoint(checkpoint, device=args.device)
+    restored = load_checkpoint(
+        checkpoint, device=args.device, attention_backend=args.attention_backend
+    )
     with torch.inference_mode():
         expected = module.model(images)
         actual = restored(images)
@@ -200,7 +207,11 @@ def main() -> None:
     torch.testing.assert_close(exported, reference, rtol=1e-5, atol=1e-4)
     # Exercise full-resolution training as well as the small overfit workload.
     # A separate module preserves the already-validated checkpoint and BN state.
-    full_training = PoseTrainingModule(YOLO26Pose()).to(device).train()
+    full_training = (
+        PoseTrainingModule(YOLO26Pose(attention_backend=args.attention_backend))
+        .to(device)
+        .train()
+    )
     scale = 640 / args.size
     full_targets = PoseTargets(
         targets.boxes * scale,
@@ -233,6 +244,7 @@ def main() -> None:
     report = {
         "passed": passed,
         "device": str(images.device),
+        "attention_backend": args.attention_backend,
         "torch": torch.__version__,
         "cpu_fallback_enabled": False,
         "steps": args.steps,

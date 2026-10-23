@@ -30,7 +30,9 @@ from nyolo.learning import PoseTrainingModule
 from nyolo.pose.types import PoseTargets
 
 device = "mps"  # または "cpu"
-training = PoseTrainingModule(YOLO26Pose(YOLO26PoseConfig(scale="s"))).to(device)
+training = PoseTrainingModule(
+    YOLO26Pose(YOLO26PoseConfig(scale="s"), attention_backend="sdpa")
+).to(device)
 optimizer = torch.optim.AdamW(training.parameters(), lr=1e-3)
 
 # images: float32 [B, 3, H, W] (RGB, 0.0〜1.0, H・Wは32の倍数)
@@ -99,5 +101,6 @@ uv run ty check src
 - [モデル・実装仕様](docs/specs/yolo26-pose.md)
 - [動作検証レポート](docs/validation.md)
 - [サイズ展開・torch.compile の検証結果と制約](docs/scale-compile-validation.md)
+- [SDPA の互換性・学習・compile 検証](docs/attention-validation.md)
 - [出典とライセンスの境界](docs/provenance.md)
 - ライセンス: [Apache-2.0](LICENSE)

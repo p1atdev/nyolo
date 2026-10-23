@@ -13,6 +13,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("cpu", "mps"), required=True)
     parser.add_argument(
+        "--attention-backend", choices=("naive", "sdpa"), default="sdpa"
+    )
+    parser.add_argument(
         "--scales", choices=tuple("nsmlx"), nargs="+", default=list("nsmlx")
     )
     parser.add_argument(
@@ -39,6 +42,7 @@ def main() -> None:
     ]
     report = {
         "backend": args.backend,
+        "attention_backend": args.attention_backend,
         "device": args.device,
         "sequential": True,
         "results": [],
@@ -62,6 +66,8 @@ def main() -> None:
             str(args.iterations),
             "--backend",
             args.backend,
+            "--attention-backend",
+            args.attention_backend,
             "--output",
             str(output),
             "--run-id",

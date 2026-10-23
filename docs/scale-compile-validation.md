@@ -4,6 +4,10 @@ Local macOS / Apple Silicon, Python 3.12.11, PyTorch 2.14.1, float32, explicit
 MPS execution. `PYTORCH_ENABLE_MPS_FALLBACK=0`. No dependency versions or uv
 exclude-newer settings were changed.
 
+These measurements used the original naive attention implementation. Following
+the addition of SDPA, pass `--attention-backend naive` to reproduce this matrix;
+they do not establish SDPA performance or numerical agreement.
+
 ## Scope and implementation
 
 The previous model was fixed to n. `YOLO26PoseConfig(scale=...)` now expands the
@@ -127,13 +131,13 @@ PyTorch documents the strict behavior of
 
 ```sh
 PYTORCH_ENABLE_MPS_FALLBACK=0 uv run --frozen python tools/validate_scales.py \
-  --device mps --output artifacts/scale-compile/scales.json
+  --device mps --attention-backend naive --output artifacts/scale-compile/scales.json
 
 PYTORCH_ENABLE_MPS_FALLBACK=0 uv run --frozen python tools/run_compile_matrix.py \
-  --device mps --output artifacts/scale-compile/inductor
+  --device mps --attention-backend naive --output artifacts/scale-compile/inductor
 
 PYTORCH_ENABLE_MPS_FALLBACK=0 uv run --frozen python tools/probe_compile.py \
-  --device mps --scale x --path model_train --repeat-reference \
+  --device mps --attention-backend naive --scale x --path model_train --repeat-reference \
   --output artifacts/scale-compile/x-training-diagnostics.json
 ```
 

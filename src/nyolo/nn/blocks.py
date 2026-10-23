@@ -3,6 +3,8 @@
 import torch
 from torch import Tensor, nn
 
+from nyolo.nn.attention import AttentionBackend, resolve_attention_kernel
+
 
 class Conv(nn.Sequential):
     def __init__(
@@ -55,8 +57,12 @@ class C3k(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, channels: int) -> None:
+    def __init__(
+        self, channels: int, *, attention_backend: AttentionBackend = "sdpa"
+    ) -> None:
         super().__init__()
+        self._attention_kernel = resolve_attention_kernel(attention_backend)
+        self._attention_backend = attention_backend
         self.heads = max(channels // 64, 1)
         self.value_dim = channels // self.heads
         self.key_dim = self.value_dim // 2
@@ -66,21 +72,26 @@ class Attention(nn.Module):
         self.position = Conv(channels, channels, 3, groups=channels, activation=False)
         self.project = Conv(channels, channels, activation=False)
 
+    @property
+    def attention_backend(self) -> AttentionBackend:
+        return self._attention_backend
+
     def forward(self, x: Tensor) -> Tensor:
         b, c, h, w = x.shape
         qkv = self.qkv(x).reshape(
             b, self.heads, 2 * self.key_dim + self.value_dim, h * w
         )
         q, k, v = qkv.split((self.key_dim, self.key_dim, self.value_dim), 2)
-        attention = (q.transpose(-1, -2) @ k * self.key_dim**-0.5).softmax(-1)
-        mixed = (v @ attention.transpose(-1, -2)).reshape(b, c, h, w)
+        mixed = self._attention_kernel(q, k, v, self.key_dim**-0.5).reshape(b, c, h, w)
         return self.project(mixed + self.position(v.reshape(b, c, h, w)))
 
 
 class PSABlock(nn.Module):
-    def __init__(self, channels: int) -> None:
+    def __init__(
+        self, channels: int, *, attention_backend: AttentionBackend = "sdpa"
+    ) -> None:
         super().__init__()
-        self.attention = Attention(channels)
+        self.attention = Attention(channels, attention_backend=attention_backend)
         self.ffn = nn.Sequential(
             Conv(channels, 2 * channels), Conv(2 * channels, channels, activation=False)
         )
@@ -99,12 +110,18 @@ class C3k2(nn.Module):
         c3k: bool = False,
         attention: bool = False,
         repeats: int = 1,
+        *,
+        attention_backend: AttentionBackend = "sdpa",
     ) -> None:
         super().__init__()
         hidden = int(out_channels * expansion)
         self.split = Conv(in_channels, hidden * 2)
         block = C3k(hidden) if c3k else Bottleneck(hidden)
-        self.block = nn.Sequential(block, PSABlock(hidden)) if attention else block
+        self.block = (
+            nn.Sequential(block, PSABlock(hidden, attention_backend=attention_backend))
+            if attention
+            else block
+        )
         self.extra_blocks = nn.ModuleList(
             C3k(hidden) if c3k else Bottleneck(hidden) for _ in range(repeats - 1)
         )
@@ -133,12 +150,19 @@ class SPPF(nn.Module):
 
 
 class C2PSA(nn.Module):
-    def __init__(self, channels: int, repeats: int = 1) -> None:
+    def __init__(
+        self,
+        channels: int,
+        repeats: int = 1,
+        *,
+        attention_backend: AttentionBackend = "sdpa",
+    ) -> None:
         super().__init__()
         self.split = Conv(channels, channels)
-        self.block = PSABlock(channels // 2)
+        self.block = PSABlock(channels // 2, attention_backend=attention_backend)
         self.extra_blocks = nn.ModuleList(
-            PSABlock(channels // 2) for _ in range(repeats - 1)
+            PSABlock(channels // 2, attention_backend=attention_backend)
+            for _ in range(repeats - 1)
         )
         self.merge = Conv(channels, channels)
 

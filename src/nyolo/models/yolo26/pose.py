@@ -7,6 +7,7 @@ from torch import Tensor, nn
 from nyolo.models.yolo26.backbone import Backbone
 from nyolo.models.yolo26.config import YOLO26PoseConfig
 from nyolo.models.yolo26.neck import Neck
+from nyolo.nn.attention import AttentionBackend, resolve_attention_kernel
 from nyolo.nn.blocks import Conv
 from nyolo.pose.types import DualPose, RawPose
 
@@ -110,13 +111,25 @@ class PoseHead(nn.Module):
 class YOLO26Pose(nn.Module):
     """Explicit paths; train()/eval() affect normalization, not the return type."""
 
-    def __init__(self, config: YOLO26PoseConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: YOLO26PoseConfig | None = None,
+        *,
+        attention_backend: AttentionBackend = "sdpa",
+    ) -> None:
         super().__init__()
+        resolve_attention_kernel(attention_backend)
+        self._attention_backend = attention_backend
         self.config = YOLO26PoseConfig() if config is None else config
-        self.backbone = Backbone(self.config)
-        self.neck = Neck(self.config)
+        self.backbone = Backbone(self.config, attention_backend=attention_backend)
+        self.neck = Neck(self.config, attention_backend=attention_backend)
         self.one_to_many = PoseHead(self.config)
         self.one_to_one = deepcopy(self.one_to_many)
+
+    @property
+    def attention_backend(self) -> AttentionBackend:
+        """Construction-time execution choice; not part of checkpoint state."""
+        return self._attention_backend
 
     def _features(self, images: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         if images.ndim != 4 or images.shape[1] != 3:

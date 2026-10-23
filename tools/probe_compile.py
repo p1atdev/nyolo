@@ -70,9 +70,15 @@ def compare_outputs(actual, expected) -> dict:
 def run(args, device: torch.device) -> dict:
     torch.manual_seed(7)
     model = (
-        YOLO26Pose(YOLO26PoseConfig(scale=args.scale)).to(device)
+        YOLO26Pose(
+            YOLO26PoseConfig(scale=args.scale), attention_backend=args.attention_backend
+        ).to(device)
         if args.checkpoint is None
-        else load_checkpoint(args.checkpoint, device=str(device))
+        else load_checkpoint(
+            args.checkpoint,
+            device=str(device),
+            attention_backend=args.attention_backend,
+        )
     )
     if model.config.scale != args.scale:
         raise ValueError("Explicit checkpoint scale differs from --scale")
@@ -240,6 +246,9 @@ def main() -> None:
     parser.add_argument("--device", choices=("cpu", "mps"), required=True)
     parser.add_argument("--scale", choices=tuple("nsmlx"), default="n")
     parser.add_argument(
+        "--attention-backend", choices=("naive", "sdpa"), default="sdpa"
+    )
+    parser.add_argument(
         "--backend", choices=("inductor", "aot_eager", "eager"), default="inductor"
     )
     parser.add_argument(
@@ -273,6 +282,7 @@ def main() -> None:
         "scale": args.scale,
         "path": args.path,
         "backend": args.backend,
+        "attention_backend": args.attention_backend,
         "fullgraph": True,
         "dynamic": False,
         "cpu_fallback_enabled": False,

@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 import torch
 from validate_pose import synthetic_batch
 
-from nyolo import YOLO26Pose, YOLO26PoseConfig
+from nyolo import AttentionBackend, YOLO26Pose, YOLO26PoseConfig
 from nyolo.checkpoint import load_checkpoint, save_checkpoint
 from nyolo.inference import decode
 from nyolo.learning import PoseTrainingModule
@@ -23,10 +23,16 @@ def synchronize(device: torch.device) -> None:
 
 
 def run(
-    scale: str, device: torch.device, inference_size: int, training_size: int
+    scale: str,
+    device: torch.device,
+    inference_size: int,
+    training_size: int,
+    attention_backend: AttentionBackend,
 ) -> dict:
     torch.manual_seed(7)
-    module = PoseTrainingModule(YOLO26Pose(YOLO26PoseConfig(scale=scale))).to(device)
+    module = PoseTrainingModule(
+        YOLO26Pose(YOLO26PoseConfig(scale=scale), attention_backend=attention_backend)
+    ).to(device)
     module.eval()
     params = sum(p.numel() for p in module.model.parameters())
     with torch.inference_mode():
@@ -82,7 +88,9 @@ def run(
     with torch.inference_mode(), TemporaryDirectory(prefix="nyolo-scale-") as temporary:
         path = Path(temporary) / "model.pt"
         save_checkpoint(path, module.model)
-        restored = load_checkpoint(path, device=str(device))
+        restored = load_checkpoint(
+            path, device=str(device), attention_backend=attention_backend
+        )
         assert restored.config == module.model.config
         torch.testing.assert_close(
             restored(images).keypoint_offsets,
@@ -114,6 +122,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("cpu", "mps"), required=True)
     parser.add_argument(
+        "--attention-backend", choices=("naive", "sdpa"), default="sdpa"
+    )
+    parser.add_argument(
         "--scales", choices=tuple("nsmlx"), nargs="+", default=list("nsmlx")
     )
     parser.add_argument("--inference-size", type=int, default=640)
@@ -130,12 +141,19 @@ def main() -> None:
     report = {
         "torch": torch.__version__,
         "device": str(device),
+        "attention_backend": args.attention_backend,
         "dtype": "float32",
         "cpu_fallback_enabled": False,
         "results": [],
     }
     for scale in args.scales:
-        result = run(scale, device, args.inference_size, args.training_size)
+        result = run(
+            scale,
+            device,
+            args.inference_size,
+            args.training_size,
+            args.attention_backend,
+        )
         report["results"].append(result)
         args.output.write_text(json.dumps(report, allow_nan=False, indent=2) + "\n")
         print(json.dumps(result), flush=True)

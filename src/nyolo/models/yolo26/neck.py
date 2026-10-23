@@ -3,11 +3,14 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from nyolo.models.yolo26.config import YOLO26PoseConfig
+from nyolo.nn.attention import AttentionBackend
 from nyolo.nn.blocks import C3k2, Conv
 
 
 class Neck(nn.Module):
-    def __init__(self, config: YOLO26PoseConfig) -> None:
+    def __init__(
+        self, config: YOLO26PoseConfig, *, attention_backend: AttentionBackend = "sdpa"
+    ) -> None:
         super().__init__()
         c256, c512, c1024 = config.head_channels
         n = config.repeats
@@ -16,7 +19,9 @@ class Neck(nn.Module):
         self.down3 = Conv(c256, c256, 3, 2)
         self.bottom4 = C3k2(c256 + c512, c512, repeats=n)
         self.down4 = Conv(c512, c512, 3, 2)
-        self.bottom5 = C3k2(c512 + c1024, c1024, attention=True)
+        self.bottom5 = C3k2(
+            c512 + c1024, c1024, attention=True, attention_backend=attention_backend
+        )
 
     def forward(
         self, features: tuple[Tensor, Tensor, Tensor]

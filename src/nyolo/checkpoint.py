@@ -7,6 +7,7 @@ import torch
 
 from nyolo.learning.criterion import LossConfig, PoseTrainingModule
 from nyolo.models.yolo26 import YOLO26Pose, YOLO26PoseConfig
+from nyolo.nn.attention import AttentionBackend
 from nyolo.pose.schema import PoseSchema
 from nyolo.runtime import resolve_device
 
@@ -47,27 +48,37 @@ def _read(path: str | Path) -> dict:
     return data
 
 
-def _restore_model(data: dict, device: str | torch.device) -> YOLO26Pose:
+def _restore_model(
+    data: dict, device: str | torch.device, attention_backend: AttentionBackend
+) -> YOLO26Pose:
     config = dict(data["config"])
     schema = dict(config.pop("schema"))
     for key in ("names", "flip_indices", "oks_sigmas"):
         schema[key] = tuple(schema[key])
     schema["skeleton"] = tuple(tuple(edge) for edge in schema["skeleton"])
-    model = YOLO26Pose(YOLO26PoseConfig(schema=PoseSchema(**schema), **config))
+    model = YOLO26Pose(
+        YOLO26PoseConfig(schema=PoseSchema(**schema), **config),
+        attention_backend=attention_backend,
+    )
     model.load_state_dict(data["model_state"], strict=True)
     return model.to(resolve_device(device))
 
 
-def load_checkpoint(path: str | Path, *, device: str) -> YOLO26Pose:
-    return _restore_model(_read(path), device).eval()
+def load_checkpoint(
+    path: str | Path, *, device: str, attention_backend: AttentionBackend = "sdpa"
+) -> YOLO26Pose:
+    return _restore_model(_read(path), device, attention_backend).eval()
 
 
-def load_training_state(path: str | Path, *, device: str) -> PoseTrainingModule:
+def load_training_state(
+    path: str | Path, *, device: str, attention_backend: AttentionBackend = "sdpa"
+) -> PoseTrainingModule:
     data = _read(path)
     if data["kind"] != "training_components":
         raise ValueError("This checkpoint contains no criterion / RLE training state")
     result = PoseTrainingModule(
-        _restore_model(data, device), LossConfig(**data["loss_config"])
+        _restore_model(data, device, attention_backend),
+        LossConfig(**data["loss_config"]),
     )
     result.criterion.load_state_dict(data["criterion_state"], strict=True)
     return result.to(resolve_device(device))

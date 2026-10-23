@@ -4,9 +4,12 @@ Environment: local macOS arm64, Python 3.12.11, PyTorch 2.14.1, float32 eager,
 device `mps:0`. `PYTORCH_ENABLE_MPS_FALLBACK=0` was set. There is no CPU
 replacement for an unsupported MPS operation.
 
+This historical run used naive attention. The explicit option below retains that
+execution path after the introduction of the SDPA default.
+
 ```sh
 PYTORCH_ENABLE_MPS_FALLBACK=0 uv run --frozen python tools/validate_pose.py \
-  --device mps --steps 240 --output artifacts/mps-smoke
+  --device mps --attention-backend naive --steps 240 --output artifacts/mps-smoke
 ```
 
 The full n model (3,640,624 parameters including both heads and uncertainty

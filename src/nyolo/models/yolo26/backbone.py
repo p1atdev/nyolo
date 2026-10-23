@@ -1,13 +1,16 @@
 from torch import Tensor, nn
 
 from nyolo.models.yolo26.config import YOLO26PoseConfig
+from nyolo.nn.attention import AttentionBackend
 from nyolo.nn.blocks import C2PSA, SPPF, C3k2, Conv
 
 
 class Backbone(nn.Module):
     """The paper's shared graph with explicit compound width/depth scaling."""
 
-    def __init__(self, config: YOLO26PoseConfig) -> None:
+    def __init__(
+        self, config: YOLO26PoseConfig, *, attention_backend: AttentionBackend = "sdpa"
+    ) -> None:
         super().__init__()
         c64, c128, c256, c512, c1024 = (
             config.channels(c) for c in (64, 128, 256, 512, 1024)
@@ -28,7 +31,7 @@ class Backbone(nn.Module):
             Conv(c512, c1024, 3, 2),
             C3k2(c1024, c1024, c3k=True, repeats=n),
             SPPF(c1024),
-            C2PSA(c1024, repeats=n),
+            C2PSA(c1024, repeats=n, attention_backend=attention_backend),
         )
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:

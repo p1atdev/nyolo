@@ -120,8 +120,20 @@ unbounded through transforms, filtering, checkpoint use and JSON serialization.
 Supported: PyTorch float32 eager on explicit cpu or mps; rectangular input sides
 divisible by 32; n/s/m/l/x pose; tensor and PIL inference; training primitives.
 MPS entry points reject PYTORCH_ENABLE_MPS_FALLBACK=1. No automatic device, dtype,
-alternate head or implementation selection is supplied. Nonfinite decoded
+alternate head or cross-backend retry is supplied. Nonfinite decoded
 predictions are an error. CUDA, Triton, TPU and other tasks are pending.
+
+Attention is an execution option, selected with attention_backend="sdpa" (default)
+or "naive" at model construction and model/training-component loading. The choice
+applies to every backbone and neck attention block, including repeated blocks.
+It is fixed before torch.compile and exposed by model.attention_backend.
+The state-dictionary keys, parameter shapes and architecture versions are unchanged.
+The naive path retains the original matmul/softmax calculation order. SDPA uses
+PyTorch's native kernel dispatch with no mask, no dropout, noncausal attention and
+an explicit scale of key_dim**-0.5. Its B,H,N,D inputs retain the original unequal
+Q/K and V dimensions; only layout is changed. SDPA failures propagate without a
+naive retry. Native dispatch is not a promise to use a specific fused kernel.
+The external flash-attn package is not supported by this release.
 
 Model-only torch.compile is investigated using explicit backend, fullgraph=True
 and dynamic=False. Inference means model(images); training means forward_train
@@ -133,7 +145,10 @@ Checkpoints contain a format version, architecture and coordinate policy, comple
 joint schema and tensor state dictionaries. Loading uses weights_only=True and
 strict state matching. Training-component files additionally retain RLE/criterion
 state and loss config; they contain no optimizer, RNG, sampler or trainer state
-and are not advertised as full training-resume files.
+and are not advertised as full training-resume files. Attention backend selection
+is not serialized: both load functions default to SDPA, including for older files.
+Pass attention_backend="naive" to reproduce the previous execution path. Changing
+backends can change floating-point rounding without changing the model equations.
 
 tools/validate_pose.py is a development-only synthetic overfit probe. It checks
 both branch gradients, RLE gradients, unconstrained XY, eval-mode accuracy on the

@@ -17,11 +17,16 @@ def main() -> None:
     predict.add_argument("--checkpoint", type=Path, required=True)
     predict.add_argument("--input", type=Path, nargs="+", required=True)
     predict.add_argument("--device", choices=("cpu", "mps"), required=True)
+    predict.add_argument(
+        "--attention-backend", choices=("naive", "sdpa"), default="sdpa"
+    )
     predict.add_argument("--size", type=int, default=640)
     predict.add_argument("--score", type=float, default=0.25)
     predict.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    model = load_checkpoint(args.checkpoint, device=args.device)
+    model = load_checkpoint(
+        args.checkpoint, device=args.device, attention_backend=args.attention_backend
+    )
     predictor = Predictor(model, device=args.device, image_size=(args.size, args.size))
     images = []
     for path in args.input:

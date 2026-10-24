@@ -11,7 +11,11 @@ from nyolo.runtime import resolve_device
 
 
 class Predictor:
-    """Puts the supplied model in eval mode on the explicitly requested device."""
+    """Moves the model to eval/device and uses a fused copy by default.
+
+    Pass fuse=False to explicitly retain separate Conv/BatchNorm execution.
+    Fusion errors propagate; execution never retries an alternative path.
+    """
 
     def __init__(
         self,
@@ -19,9 +23,12 @@ class Predictor:
         *,
         device: str,
         image_size: tuple[int, int] = (640, 640),
+        fuse: bool = True,
     ) -> None:
         self.device = resolve_device(device)
         self.model = model.to(self.device).eval()
+        if fuse:
+            self.model = self.model.fuse()
         self.image_size = image_size
 
     @torch.inference_mode()

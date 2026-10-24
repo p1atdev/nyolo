@@ -138,8 +138,9 @@ The external flash-attn package is not supported by this release.
 Model-only torch.compile is investigated using explicit backend, fullgraph=True
 and dynamic=False. Inference means model(images); training means forward_train
 compiled with criterion outside the compiled region. PIL/JSON IO and annotation
-validation are separate boundaries. No automatic eager retry is provided. See
-the runtime validation report for the measured support and performance envelope.
+validation are separate boundaries. No automatic eager retry is provided.
+Local measurements and validation reports are kept in the Git-ignored notes/
+directory rather than distributed with the specification.
 
 Checkpoints contain a format version, architecture and coordinate policy, complete
 joint schema and tensor state dictionaries. Loading uses weights_only=True and

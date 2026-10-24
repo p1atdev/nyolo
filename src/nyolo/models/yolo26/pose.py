@@ -3,6 +3,7 @@ from math import log
 
 import torch
 from torch import Tensor, nn
+from torch.nn.utils import fuse_conv_bn_eval
 
 from nyolo.models.yolo26.backbone import Backbone
 from nyolo.models.yolo26.config import YOLO26PoseConfig
@@ -120,6 +121,7 @@ class YOLO26Pose(nn.Module):
         super().__init__()
         resolve_attention_kernel(attention_backend)
         self._attention_backend = attention_backend
+        self._is_fused = False
         self.config = YOLO26PoseConfig() if config is None else config
         self.backbone = Backbone(self.config, attention_backend=attention_backend)
         self.neck = Neck(self.config, attention_backend=attention_backend)
@@ -130,6 +132,46 @@ class YOLO26Pose(nn.Module):
     def attention_backend(self) -> AttentionBackend:
         """Construction-time execution choice; not part of checkpoint state."""
         return self._attention_backend
+
+    @property
+    def is_fused(self) -> bool:
+        """Whether this is an inference-only copy with folded BatchNorm."""
+        return self._is_fused
+
+    def fuse(self) -> "YOLO26Pose":
+        """Return an independent eval-only copy with Conv/BatchNorm folded.
+
+        Call after loading weights and eval(), and before torch.compile(). Keep
+        the original model for training and checkpoint saving. No weights or
+        running statistics in the original model are changed.
+        """
+        if self.training or any(
+            m.training for m in self.modules() if isinstance(m, nn.BatchNorm2d)
+        ):
+            raise ValueError("Call eval() before fusing Conv/BatchNorm")
+        result = deepcopy(self)
+        if not result.is_fused:
+            for module in result.modules():
+                if isinstance(module, Conv):
+                    conv, norm = module[0], module[1]
+                    if not isinstance(conv, nn.Conv2d) or not isinstance(
+                        norm, nn.BatchNorm2d
+                    ):
+                        raise TypeError(
+                            "Fusion requires Conv2d followed by BatchNorm2d"
+                        )
+                    module[0] = fuse_conv_bn_eval(conv, norm)
+                    module[1] = nn.Identity()
+            result._is_fused = True
+        result.requires_grad_(False)
+        return result.eval()
+
+    def train(self, mode: bool = True) -> "YOLO26Pose":
+        if mode and self.is_fused:
+            raise ValueError(
+                "Fused models are inference-only; train the original model"
+            )
+        return super().train(mode)
 
     def _features(self, images: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         if images.ndim != 4 or images.shape[1] != 3:
@@ -151,6 +193,10 @@ class YOLO26Pose(nn.Module):
         return self.one_to_one(self._features(images), tuple(images.shape[-2:]), False)
 
     def forward_train(self, images: Tensor) -> DualPose:
+        if self.is_fused:
+            raise ValueError(
+                "Fused models are inference-only; train the original model"
+            )
         features = self._features(images)
         size = tuple(images.shape[-2:])
         return DualPose(

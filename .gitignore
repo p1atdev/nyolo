@@ -11,3 +11,6 @@ wheels/
 .pytest_cache/
 .ruff_cache/
 artifacts/
+
+# Local validation results and investigation notes
+/notes/

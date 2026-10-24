@@ -21,13 +21,21 @@ def main() -> None:
         "--attention-backend", choices=("naive", "sdpa"), default="sdpa"
     )
     predict.add_argument("--size", type=int, default=640)
+    predict.add_argument(
+        "--fuse",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Fold Conv/BatchNorm for inference (default: enabled)",
+    )
     predict.add_argument("--score", type=float, default=0.25)
     predict.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     model = load_checkpoint(
         args.checkpoint, device=args.device, attention_backend=args.attention_backend
     )
-    predictor = Predictor(model, device=args.device, image_size=(args.size, args.size))
+    predictor = Predictor(
+        model, device=args.device, image_size=(args.size, args.size), fuse=args.fuse
+    )
     images = []
     for path in args.input:
         with Image.open(path) as image:

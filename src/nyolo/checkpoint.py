@@ -13,6 +13,8 @@ from nyolo.runtime import resolve_device
 
 
 def _model_payload(model: YOLO26Pose) -> dict:
+    if model.is_fused:
+        raise ValueError("Save the original unfused model, then fuse after loading")
     return {
         "format_version": 1,
         "config": asdict(model.config),

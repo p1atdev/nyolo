@@ -99,8 +99,5 @@ uv run ty check src
 ## 詳細ドキュメント・ライセンス
 
 - [モデル・実装仕様](docs/specs/yolo26-pose.md)
-- [動作検証レポート](docs/validation.md)
-- [サイズ展開・torch.compile の検証結果と制約](docs/scale-compile-validation.md)
-- [SDPA の互換性・学習・compile 検証](docs/attention-validation.md)
 - [出典とライセンスの境界](docs/provenance.md)
 - ライセンス: [Apache-2.0](LICENSE)

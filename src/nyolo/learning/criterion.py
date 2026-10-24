@@ -6,7 +6,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from nyolo.geometry.boxes import box_area, complete_iou
-from nyolo.inference.decode import decode_boxes, decode_keypoints
+from nyolo.inference.decode import decode_boxes
 from nyolo.learning.assignment import task_aligned_assignment
 from nyolo.learning.rle import ResidualFlow, rle_loss
 from nyolo.models.yolo26 import YOLO26Pose
@@ -86,22 +86,24 @@ class PoseCriterion(nn.Module):
             )
             / normalizer
         )
-        zero = (
-            raw.box_distances.sum()
-            + raw.keypoint_offsets.sum()
-            + raw.keypoint_logits.sum()
-            + raw.sigma_logits.sum()
-        ) * 0
-        parts = {
-            "box": zero,
-            "box_l1": zero,
-            "classification": classification,
-            "oks": zero,
-            "rle": zero,
-            "keypoint_score": zero,
-        }
         if bi.numel() == 0:
-            return parts
+            # Only an empty branch needs dummy gradient connections. Positive
+            # branches connect every head through the actual losses below.
+            zero = (
+                raw.box_distances.sum()
+                + raw.keypoint_offsets.sum()
+                + raw.keypoint_logits.sum()
+                + raw.sigma_logits.sum()
+            ) * 0
+            return {
+                "box": zero,
+                "box_l1": zero,
+                "classification": classification,
+                "oks": zero,
+                "rle": zero,
+                "keypoint_score": zero,
+            }
+        parts = {}
         weights = assignment.quality[bi, ai]
         gt_box = targets.boxes[bi, ti]
         predicted_box = boxes[bi, ai]
@@ -116,9 +118,14 @@ class PoseCriterion(nn.Module):
         parts["box_l1"] = (
             (raw.box_distances[bi, ai] - distances).abs().mean(-1) * weights
         ).sum() / normalizer
+        parts["classification"] = classification
         known = targets.visibility[bi, ti] > 0
         gt_xy = torch.where(known[..., None], targets.keypoints[bi, ti], 0)
-        predicted_xy = decode_keypoints(raw)[bi, ai]
+        # Decode only assigned keypoints, not B*A*K coordinates followed by a
+        # gather. This preserves the unbounded affine transform and gradients.
+        predicted_xy = (
+            anchors[:, None, :] + 2 * strides[:, None, :] * raw.keypoint_offsets[bi, ai]
+        )
         # Mask before nonlinear arithmetic: multiplying a NaN by zero is not safe.
         residual = torch.where(known[..., None], predicted_xy - gt_xy, 0)
         area = box_area(gt_box).clamp_min(1e-7)
@@ -126,6 +133,10 @@ class PoseCriterion(nn.Module):
         oks = 1 - torch.exp(-residual.square().sum(-1) / denominator)
         counts = known.sum(-1).clamp_min(1)
         parts["oks"] = ((oks * known).sum(-1) / counts * weights).sum() / normalizer
+        rle = rle_loss(
+            residual / area.sqrt()[:, None, None], raw.sigma_logits[bi, ai], self.flow
+        )
+        parts["rle"] = ((rle * known).sum(-1) / counts * weights).sum() / normalizer
         parts["keypoint_score"] = (
             F.binary_cross_entropy_with_logits(
                 raw.keypoint_logits[bi, ai],
@@ -134,10 +145,6 @@ class PoseCriterion(nn.Module):
             ).mean(-1)
             * weights
         ).sum() / normalizer
-        rle = rle_loss(
-            residual / area.sqrt()[:, None, None], raw.sigma_logits[bi, ai], self.flow
-        )
-        parts["rle"] = ((rle * known).sum(-1) / counts * weights).sum() / normalizer
         return parts
 
     def forward(
@@ -162,7 +169,7 @@ class PoseCriterion(nn.Module):
         )
         components = {f"many/{k}": v for k, v in many.items()}
         components.update({f"one/{k}": v for k, v in one.items()})
-        total = raw.class_logits.sum() * 0
+        total = raw.class_logits.new_zeros(())
         for name in many:
             mixed = many_weight * many[name] + (1 - many_weight) * one[name]
             total = total + getattr(c, name) * mixed

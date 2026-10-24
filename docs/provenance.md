@@ -1,7 +1,20 @@
 # Implementation provenance
 
 nyolo is an independently written PyTorch implementation. No Ultralytics source,
-model YAML, serialized modules, or pretrained parameters are used in this project.
+model YAML, serialized modules, or pretrained parameters are incorporated into
+the library.
+
+`tools/benchmark_ultralytics.py` optionally executes the separately installed
+Ultralytics package as a comparison target. That package constructs its own
+randomly initialized model from its bundled configuration; the benchmark does
+not copy, translate, or distribute its implementation, YAML, or weights. It is
+not a runtime or build dependency of nyolo. The comparison package remains
+subject to its own license.
+
+Inference Conv/BatchNorm folding calls PyTorch's `torch.nn.utils.fuse_conv_bn_eval`
+API. It uses the loaded running statistics and preserves the original unfused
+model for training/checkpoint saving. Reference:
+https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.fuse_conv_bn_eval.html.
 
 Specification sources:
 

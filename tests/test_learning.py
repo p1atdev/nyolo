@@ -55,6 +55,12 @@ def test_unknown_and_empty_targets_are_finite(device, empty):
     output = criterion(DualPose(raw, raw), targets, progress=0.0)
     output.total.backward()
     assert torch.isfinite(output.total)
+    for value in raw[:5]:
+        assert value.grad is not None
+        assert torch.isfinite(value.grad).all()
+    if empty:
+        for value in (raw.box_distances, raw.keypoint_offsets, raw.sigma_logits):
+            assert value.grad.count_nonzero() == 0
     assert torch.isfinite(raw.keypoint_offsets.grad).all()
     assert raw.keypoint_offsets.grad.abs().sum() == 0
     assert output.components["one/rle"] == 0
